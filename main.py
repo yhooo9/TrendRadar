@@ -38,6 +38,7 @@ def load_config():
         "REQUEST_INTERVAL": config_data["crawler"]["request_interval"],
         "REPORT_MODE": config_data["report"]["mode"],
         "RANK_THRESHOLD": config_data["report"]["rank_threshold"],
+        "REPORT_DAYS": config_data["report"].get("report_days", 1),
         "USE_PROXY": config_data["crawler"]["use_proxy"],
         "DEFAULT_PROXY": config_data["crawler"]["default_proxy"],
         "ENABLE_CRAWLER": config_data["crawler"]["enable_crawler"],
@@ -613,43 +614,49 @@ def parse_file_titles(file_path: Path) -> Tuple[Dict, Dict]:
 def read_all_today_titles(
     current_platform_ids: Optional[List[str]] = None,
 ) -> Tuple[Dict, Dict, Dict]:
-    """读取当天所有标题文件，支持按当前监控平台过滤"""
-    date_folder = format_date_folder()
-    txt_dir = Path("output") / date_folder / "txt"
-
-    if not txt_dir.exists():
-        return {}, {}, {}
-
+    """读取指定天数内的所有标题文件，支持按当前监控平台过滤"""
+    report_days = CONFIG["REPORT_DAYS"]
     all_results = {}
     final_id_to_name = {}
     title_info = {}
 
-    files = sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"])
+    today = get_beijing_time().date()
+    
+    # 从 report_days 天前开始遍历到今天
+    for i in range(report_days - 1, -1, -1):
+        current_date = today - timedelta(days=i)
+        date_folder = current_date.strftime("%Y年%m月%d日")
+        txt_dir = Path("output") / date_folder / "txt"
 
-    for file_path in files:
-        time_info = file_path.stem
+        if not txt_dir.exists():
+            continue
 
-        titles_by_id, file_id_to_name = parse_file_titles(file_path)
+        files = sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"])
 
-        if current_platform_ids is not None:
-            filtered_titles_by_id = {}
-            filtered_id_to_name = {}
+        for file_path in files:
+            time_info = file_path.stem # 文件名作为时间信息
+
+            titles_by_id, file_id_to_name = parse_file_titles(file_path)
+
+            if current_platform_ids is not None:
+                filtered_titles_by_id = {}
+                filtered_id_to_name = {}
+
+                for source_id, title_data in titles_by_id.items():
+                    if source_id in current_platform_ids:
+                        filtered_titles_by_id[source_id] = title_data
+                        if source_id in file_id_to_name:
+                            filtered_id_to_name[source_id] = file_id_to_name[source_id]
+
+                titles_by_id = filtered_titles_by_id
+                file_id_to_name = filtered_id_to_name
+
+            final_id_to_name.update(file_id_to_name)
 
             for source_id, title_data in titles_by_id.items():
-                if source_id in current_platform_ids:
-                    filtered_titles_by_id[source_id] = title_data
-                    if source_id in file_id_to_name:
-                        filtered_id_to_name[source_id] = file_id_to_name[source_id]
-
-            titles_by_id = filtered_titles_by_id
-            file_id_to_name = filtered_id_to_name
-
-        final_id_to_name.update(file_id_to_name)
-
-        for source_id, title_data in titles_by_id.items():
-            process_source_data(
-                source_id, title_data, time_info, all_results, title_info
-            )
+                process_source_data(
+                    source_id, title_data, time_info, all_results, title_info
+                )
 
     return all_results, final_id_to_name, title_info
 
@@ -728,19 +735,23 @@ def process_source_data(
 
 
 def detect_latest_new_titles(current_platform_ids: Optional[List[str]] = None) -> Dict:
-    """检测当日最新批次的新增标题，支持按当前监控平台过滤"""
-    date_folder = format_date_folder()
-    txt_dir = Path("output") / date_folder / "txt"
+    """检测最新批次的新增标题，与过去 report_days 天的历史数据进行比较，支持按当前监控平台过滤"""
+    report_days = CONFIG["REPORT_DAYS"]
+    today = get_beijing_time().date()
 
-    if not txt_dir.exists():
+    all_files_in_range = []
+    for i in range(report_days):
+        current_date = today - timedelta(days=i)
+        date_folder = current_date.strftime("%Y年%m月%d日")
+        txt_dir = Path("output") / date_folder / "txt"
+        if txt_dir.exists():
+            all_files_in_range.extend(sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"]))
+
+    if not all_files_in_range:
         return {}
 
-    files = sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"])
-    if len(files) < 2:
-        return {}
-
-    # 解析最新文件
-    latest_file = files[-1]
+    # 获取最新抓取的文件
+    latest_file = all_files_in_range[-1]
     latest_titles, _ = parse_file_titles(latest_file)
 
     # 如果指定了当前平台列表，过滤最新文件数据
@@ -751,9 +762,9 @@ def detect_latest_new_titles(current_platform_ids: Optional[List[str]] = None) -
                 filtered_latest_titles[source_id] = title_data
         latest_titles = filtered_latest_titles
 
-    # 汇总历史标题（按平台过滤）
+    # 汇总所有历史标题（不包括最新文件），并按平台过滤
     historical_titles = {}
-    for file_path in files[:-1]:
+    for file_path in all_files_in_range[:-1]: # 遍历除最新文件外的所有文件
         historical_data, _ = parse_file_titles(file_path)
 
         # 过滤历史数据

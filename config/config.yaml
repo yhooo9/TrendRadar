@@ -1,6 +1,6 @@
 app:
   version_check_url: "https://raw.githubusercontent.com/sansan0/TrendRadar/refs/heads/master/version"
-  show_version_update: true # 控制显示版本更新提示，如果 false，则不接受新版本提示
+  show_version_update: false # 控制显示版本更新提示，如果 false，则不接受新版本提示
 
 crawler:
   request_interval: 1000 # 请求间隔(毫秒)
@@ -26,6 +26,7 @@ crawler:
 report:
   mode: "daily" # 可选: "daily"|"incremental"|"current"
   rank_threshold: 5 # 排名高亮阈值
+  report_days: 1 # 报告天数，默认为1（当天），可设置为7（近7天）等
 
 notification:
   enable_notification: true # 是否启用通知功能，如果 false，则不发送手机通知
